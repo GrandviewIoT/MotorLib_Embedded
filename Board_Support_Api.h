@@ -36,8 +36,11 @@
 #ifndef _BOARD_SUPPORT_API_H_
 #define   _BOARD_SUPPORT_API_H_
 
-#include <stdint.h>                    // pull in standard int16_t, etc defs
+#include <stdint.h>              // pull in standard int16_t, etc defs
 #include <stdbool.h>
+
+              // valid options for option_flags on board_init()
+#define  NO_SYSTICK_ENABLE  1    // do not auto-enable Systick during board_init
 
 void  board_init (long mcu_clock_rate, int option_flags);
 void  board_delay_ms (long wait_time);

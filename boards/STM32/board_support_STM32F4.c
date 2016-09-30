@@ -112,6 +112,7 @@ uint32_t  HAL_GetTick (void)
 //  board_init
 //
 //            Initializes board clocks and basic GPIOs.
+//            A non-zero flags value = NO_SYSTICK_ENABLE
 //******************************************************************************
 
 void  board_init (long mcu_clock_rate, int option_flags)

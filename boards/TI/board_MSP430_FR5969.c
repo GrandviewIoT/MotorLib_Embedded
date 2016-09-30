@@ -72,6 +72,7 @@
 //  board_init
 //
 //           Initialize system clocks, and basic GPIOs
+//           A non-zero flags value = NO_SYSTICK_ENABLE
 //*****************************************************************************
 
 void  board_init (long mcu_clock_rate)
@@ -82,9 +83,10 @@ void  board_init (long mcu_clock_rate)
        board_system_clock_config (mcu_clock_rate); // user specified clock speed
        else board_system_clock_config (8000000);   // use default: run at 8 MHz
 
-    board_gpio_init();              // turn on key GPIO clocks, ...
+    board_gpio_init();                 // turn on key GPIO clocks, ...
 
-    board_systick_timer_config();   // turn on "Systick" timer
+    if (flags == 0)
+       board_systick_timer_config();   // turn on "Systick" timer
 }
 
 

@@ -102,6 +102,7 @@
 //  board_init
 //
 //           Initialize system clocks, and basic GPIOs
+//           A non-zero flags value = NO_SYSTICK_ENABLE
 //******************************************************************************
 
 void  board_init (long mcu_clock_rate)
@@ -115,9 +116,10 @@ void  board_init (long mcu_clock_rate)
        //----------------------------------------------------------
        //   Configure basic peripherals needed for W5200 / CC3000
        //----------------------------------------------------------
-    board_gpio_init();              // turn on key GPIO clocks, ...
+    board_gpio_init();                 // turn on key GPIO clocks, ...
 
-    board_systick_timer_config();   // ensure "Systick" timer is turned on
+    if (flags == 0)
+       board_systick_timer_config();   // ensure "Systick" timer is turned on
 }
 
 

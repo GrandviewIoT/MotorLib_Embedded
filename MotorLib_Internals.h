@@ -146,6 +146,9 @@ typedef  struct  motorcb {   //      Structure used for Motor Control Info
         uint16_t  mtr_spi_cmd_request;
         uint16_t  mtr_spi_reply;
 
+                       // for small RAM MCUs (e.g. MSP430-G2554) we run out
+                       // of room for stack if pull in all BLDC vars for BDC/STEP
+#if defined(MOTOR_IS_BLDC)
                       //---------------------------------------
                       //           BLDC only fields
                       //---------------------------------------
@@ -186,6 +189,7 @@ typedef  struct  motorcb {   //      Structure used for Motor Control Info
         uint16_t  mtr_Phase_A_Current_Sense; // raw ADC value
         uint16_t  mtr_Phase_B_Current_Sense; // raw ADC value
         uint16_t  mtr_Phase_C_Current_Sense; // raw ADC value
+#endif                                       // end  defined(MOTOR_IS_BLDC)
 
       }   MOTOR_BLOCK;
 

@@ -62,6 +62,7 @@ void  board_system_clock_config (long  mcu_clock_hz, int options_flags);
 //  board_init
 //
 //            Initializes board clocks and basic GPIOs.
+//            A non-zero flags value = NO_SYSTICK_ENABLE
 //******************************************************************************
 
 void  board_init (long mcu_clock_rate, int option_flags)
@@ -77,6 +78,8 @@ void  board_init (long mcu_clock_rate, int option_flags)
        // Invoke MCU dependent GPIO clock startup
        //------------------------------------------
     board_gpio_init();
+
+     // where is SYSTICK Timer started ?    09/03/16
 }
 
 

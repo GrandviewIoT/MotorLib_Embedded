@@ -150,6 +150,12 @@ extern int           _g_PWM_rc;          // located in BLDC_motor_ctl_lib.c
 extern unsigned char  Hall_CW_DIR_sequence[];      // fwd ref
 #endif
 
+
+#if defined(TI_CCS_COMPILER)
+//void __attribute__((weak)) MOTOR_HANDLERS * DRV8848_GetMotorHandle(void) {return ((MOTOR_HANDLERS*) 0);}
+          // This fights with the MOTOR_HANDLERS  *_g_mtrdrvr = &drv8848_table; definition below
+#endif
+
                 //---------------------------------------------
                // pick up the appropriate Motor Driver support
                 //---------------------------------------------
@@ -203,28 +209,9 @@ extern unsigned char  Hall_CW_DIR_sequence[];      // fwd ref
 #else
 error "You must define a MOTOR_DRIVER entry"
 #endif
-                        // Module Prototype Defs
-MOTOR_HANDLERS * STSPIN250_GetMotorHandle(void);
-MOTOR_HANDLERS * L6206_GetMotorHandle(void);
-MOTOR_HANDLERS * L293D_GetMotorHandle(void);
-MOTOR_HANDLERS * SN754410_GetMotorHandle(void);
-MOTOR_HANDLERS * DRV8848_GetMotorHandle(void);
 
-MOTOR_HANDLERS * STSPIN220_GetMotorHandle(void);
-MOTOR_HANDLERS * L6470_GetMotorHandle(void);
-MOTOR_HANDLERS * L6474_GetMotorHandle(void);
-MOTOR_HANDLERS * Powerstep01_GetMotorHandle(void);
-MOTOR_HANDLERS * DRV8711_GetMotorHandle(void);
 
-MOTOR_HANDLERS * STSPIN230_GetMotorHandle(void);
-MOTOR_HANDLERS * L6208_GetMotorHandle(void);
-MOTOR_HANDLERS * L6230_GetMotorHandle(void);
-MOTOR_HANDLERS * L6398_GetMotorHandle(void);
-MOTOR_HANDLERS * DRV8301_GetMotorHandle(void);
-MOTOR_HANDLERS * DRV8305_GetMotorHandle(void);
-MOTOR_HANDLERS * PSOC037_GetMotorHandle(void);
-
-#if ! defined(CYPRESS_COMPILER)
+#if defined(ST_GNU_IAR_COMPILERS)
              // Cypress KEIL compiler barfs on __weak keyword
                          // Get motor handle for STSPIN250 BDC
 __weak MOTOR_HANDLERS * STSPIN250_GetMotorHandle(void) {return ((MOTOR_HANDLERS*) 0);}
@@ -262,6 +249,29 @@ __weak MOTOR_HANDLERS * DRV8301_GetMotorHandle(void) {return ((MOTOR_HANDLERS*) 
 __weak MOTOR_HANDLERS * DRV8305_GetMotorHandle(void) {return ((MOTOR_HANDLERS*) 0);}
                          // Get motor handle for PSOC037 BLDC
 __weak MOTOR_HANDLERS * PSOC037_GetMotorHandle(void) {return ((MOTOR_HANDLERS*) 0);}
+#endif
+
+#if defined (CYPRESS_COMPILER)
+                        // Module Prototype Defs
+MOTOR_HANDLERS * STSPIN250_GetMotorHandle(void);
+MOTOR_HANDLERS * L6206_GetMotorHandle(void);
+MOTOR_HANDLERS * L293D_GetMotorHandle(void);
+MOTOR_HANDLERS * SN754410_GetMotorHandle(void);
+MOTOR_HANDLERS * DRV8848_GetMotorHandle(void);
+
+MOTOR_HANDLERS * STSPIN220_GetMotorHandle(void);
+MOTOR_HANDLERS * L6470_GetMotorHandle(void);
+MOTOR_HANDLERS * L6474_GetMotorHandle(void);
+MOTOR_HANDLERS * Powerstep01_GetMotorHandle(void);
+MOTOR_HANDLERS * DRV8711_GetMotorHandle(void);
+
+MOTOR_HANDLERS * STSPIN230_GetMotorHandle(void);
+MOTOR_HANDLERS * L6208_GetMotorHandle(void);
+MOTOR_HANDLERS * L6230_GetMotorHandle(void);
+MOTOR_HANDLERS * L6398_GetMotorHandle(void);
+MOTOR_HANDLERS * DRV8301_GetMotorHandle(void);
+MOTOR_HANDLERS * DRV8305_GetMotorHandle(void);
+MOTOR_HANDLERS * PSOC037_GetMotorHandle(void);
 #endif
 
                 //-----------------------------------------------------
@@ -373,8 +383,10 @@ int   MotorLib_Init_Chip (long mcu_speed)   // also pass driver type (DRV9948, S
 
 int  MotorLib_Init_Motor (uint8_t motor_id, int pwm_speed, int pole_pairs)
 {
-    MOTOR_BLOCK  *mtr_blk;
-    long         period_ticks;
+    MOTOR_BLOCK        *mtr_blk;
+    unsigned long int  cpu_ticks_per_sec;    // have to use long _int_ to handle
+    unsigned long int  period_ticks;         //  MSP430 compiler goofiness
+    unsigned long int  pwm_speed_long;
 
        //-----------------------------------------------------------------------
        // First, ensure that the basic functions in MotorLib, especially
@@ -390,30 +402,39 @@ int  MotorLib_Init_Motor (uint8_t motor_id, int pwm_speed, int pole_pairs)
        //-----------------------------------------------------------------------
     mtr_blk = &motor_blk [motor_id];
 
-    memset (mtr_blk, 0, sizeof(MOTOR_BLOCK));    // ensure is cleared out
+//  memset (mtr_blk, 0, sizeof(MOTOR_BLOCK));    // ensure is cleared out
+
+//return (0);  // 08/28/16 - brute force tests to see why stack getting clobbered - STACK IS FUCKED UP AT THIS POINT ==> MEMSET LENGTH IS WRONG
+
 
 // in future, add to table (ensure no competing entry)
 
     mtr_blk->mtr_id     = motor_id;
     mtr_blk->mtr_cb_sig = MOTOR_DRIVER;
     mtr_blk->mtr_state  = MOTOR_STATE_STOPPED;   // denote are currently stopped
-    mtr_blk->mtr_Trapezoidal_Index = 1;          // set startup defaults
     mtr_blk->mtr_direction  = DIRECTION_CW;
 
     mtr_blk->mtr_pole_pairs = pole_pairs;        // save # pole pairs in motor
 // derive and compute any additional stuff based on # pole pairs
 
 #if defined(MOTOR_IS_BLDC)
+    mtr_blk->mtr_Trapezoidal_Index = 1;          // set BLDC startup defaults
     mtr_blk->mtr_hall_sector = Hall_CW_DIR_sequence[1];
 #endif                                           // defined(MOTOR_IS_BLDC)
 
        //----------------------------------------------------------------------
        // Using the MCU clock, get the correct PWM tick count for 20 KHz PWM
        //----------------------------------------------------------------------
-    period_ticks    = (_g_mtr_mcu_speed / pwm_speed) - 1;
+    cpu_ticks_per_sec = board_system_clock_get_frequency();
+       // MSP430 CCS Compiler CAUTION: turning on "Local Optimization" or above
+       //        causes their optimizer to optimize out the following 3
+       //        statements, causing period_ticks value to be totally screwed up
+    pwm_speed_long    = pwm_speed;   // ensure everything in 32 bit long for DIV
+    period_ticks      = cpu_ticks_per_sec / pwm_speed_long;
+    period_ticks--;                         // deduct by 1 for Modulo 0 counters
     _g_period_ticks_ratio = ((float) period_ticks) / 100.00;  // create 100% ratio
 
-    mtr_blk->mtr_pwm_period_ticks = period_ticks;  // save our PWM perid
+    mtr_blk->mtr_pwm_period_ticks = period_ticks;     // save our PWM perid
     _g_pwm_period_ticks = period_ticks;               // and a global copy/DEBUG
 
        //----------------------------------------------------------------------
@@ -703,7 +724,7 @@ uint16_t  MotorLib_Get_Current_Speed (uint8_t motor_id, int speed_type)
     if (speed_type == SPEED_PPS)
        return (motor_blk[motor_id].mtr_current_velocity_pc);
        else if (speed_type == SPEED_RPM)
-               ;
+               ;                         // 09/03/16 - NEED TO ADD THIS ??? !!!
        else return (ERROR_INVALID_SPEED_TYPE);
 }
 

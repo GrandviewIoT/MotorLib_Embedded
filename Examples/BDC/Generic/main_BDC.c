@@ -1,4 +1,36 @@
 
+// CAUTION:  L6206 - requires a minimum of 8V, so the 6V DAGU motors WILL NOT WORK with L6206 !
+//           ^^^^^              ^^^^^^^^^^^^^         ^^^^^^^^^^^^^^      ^^^^^^^^
+
+// (1) ENCODERS: not seeing any signal on encoder signal line, even on Oscscope.
+//           ==> pullups on MSP432 are not strong enough.
+//           ==> need to run 5V to pullups and power, divide down for MSP432 GPIO
+//           ==> need to do standalone diagnostics of Encoders.
+//
+// (2) DRV8848   Current Control VRef ADC is not properly being read.   04/16/16
+//           ==> problem in sequencing/logic of ADC14 for multi-channel.
+//
+// (3) Need to revisit motor_stop() always reseting dty_cycle to 0. Is that consistent with other Motor Driver packages ?
+//     What does SPN4 do, and what does TI' BDC (MSDP430) do ?   Ditto Arduino Ada-lib  (Margolois)
+//
+// (4) Getting glitching during main() while() when switch motor direction on
+//     MSP430.  Restarts with motors full out, and have to ramp ADC up/Down
+//     to get things to reset.  Also ADC range appears reduced in FORWARD mode
+//     in such cases.
+//    Also, need to tape bottom of Grove so it does not touch/short FR5969 JTAG.
+
+                            // DEBUG Intercepts - Tiva PWMs stop on debug halts
+volatile int  wait_0 = 1;   // PWM Loop Testy       Motor 1
+volatile int  wait_1 = 0;   // Forward Slow Decay   Motor 1
+volatile int  wait_2 = 0;   // Reverse Slow Decay   Motor 1
+volatile int  wait_3 = 0;   // Peak 90% Slow Decay  Motor 1
+volatile int  wait_4 = 0;   // Forward Fast Decay   Motor 1
+volatile int  wait_5 = 0;   // Reverse Fast Decay   Motor 1
+volatile int  wait_6 = 0;   // Forward Slow Decay   Motor 2          -------
+volatile int  wait_7 = 0;   // Reverse Slow Decay   Motor 2
+volatile int  wait_8 = 0;   // Forward RAMP UP Slow Decay   Motor 1  -------
+volatile int  wait_9 = 0;   // Forward RAMP DOWN Slow Decay Motor 1
+
 //*******1*********2*********3*********4*********5*********6*********7**********
 //
 //                                  main_BDC.c
@@ -92,6 +124,8 @@
 //   05/12/16 - Got fully working on Tiva 123G Launchpad with DRV8848.
 //   05/14/16 - Got fully working on STM32-F4-46 with XNucleo L6206.
 //   05/16/16 - Got fully working on MSP430-FR5959 Launchpad with DRV8848.
+//   09/03/16 - Finally got working on MSP430-G2553 Launchpad with DRV8848,
+//              after working around a CCS compiler optimizer bug.
 //
 // -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -
 //
@@ -175,15 +209,16 @@ void  main (void)
  {
     int   switch_input;
 
+       //--------------------------------------------------------------
+       // initialize the board's key clocks, and turn on SYSTICK timer.
+       // Note that setting the MCU_SPEED parm to a value of 0 denotes
+       // "run the chip at it fastest speed".
+       //--------------------------------------------------------------
     board_clock_init (MCU_SPEED, 0);
-
-    board_systick_init();     // set up 1 ms systick Timer period
 
        /* Enable the FPU for floating point operation */
 /// MAP_FPU_enableModule();
 /// MAP_FPU_enableLazyStacking();
-
-    board_gpio_init();        // initialize GPIO switch used for motor direction
 
        //--------------------------------------------------
        // initialize motors
@@ -193,8 +228,11 @@ void  main (void)
 // -- FUTURE -- add bi-directional vs uni-directional flag --
 // -- FUTURE -- Some of parameter stuff needs to be be put in contro_config.hn file (Posts/Pins/Mappings)
 
-    MotorLib_Init_Motor (0, 1, PWM_SPEED); // setup motor 1 PWM for 20 kHz period (50 usec)
-    MotorLib_Init_Motor (1, 2, PWM_SPEED); // setup motor 2 PWM for 20 kHz period (50 usec)
+    MotorLib_Init_Motor (0, PWM_SPEED, 1); // setup motor 1 PWM for 20 kHz period (50 usec)
+// 08/28/16 even after remove memset, it still fucks up syack at end of 2nd  MotorLib_Init_Motor()
+//          See if eliminating that helps get rid of stack clobber.  else impies mis-match in motor_block[] size (one thinks is 1 entry, other thinks is 2 entries)
+//  MotorLib_Init_Motor (1, 2, PWM_SPEED); // setup motor 2 PWM for 20 kHz period (50 usec)  08/28/16 - loops multiple times thru here !!!
+// 09/27/16  blows up (invalid stk ptr) at the tail end of the above call !
     MotorLib_Adc_Init_Speed_Control (15, 0L);   // arbitrary ADC channel
     MotorLib_Encoder_Init (0, ENCODER_HALL_RIGHT_WHEEL);
     MotorLib_Encoder_Init (1, ENCODER_HALL_LEFT_WHEEL);
@@ -231,7 +269,7 @@ void  main (void)
     while (1)
       {
              // check if direction has been changed, on slider switch P6.0
-        switch_input = SWITCH1_READ;  // get curr setting of slider switch P6.0
+//      switch_input = SWITCH1_READ;  // get curr setting of slider switch P6.0
         if (switch_input == 0)
            process_direction_switch (DIRECTION_FORWARD, 1);
            else process_direction_switch (DIRECTION_BACKWARD, 1);
@@ -321,6 +359,8 @@ void  operational_test (void)
 //  MotorLib_Set_Direction (0, DIRECTION_FORWARD);   // AIN2_PWM,  AIN1_HIGH
     MotorLib_Set_Speed_Duty_Cycle (0, 80); //   J4-2       J4-1
     MotorLib_Run (0, DIRECTION_FORWARD);   // enable motors with specified direction  - with SLOW decay, motors run flat out at 100 % !!!
+    while (wait_0)
+      ;                                    // keep running till told to bail out
     board_delay_ms (2000);                 // run for 2 seconds
 
 #if defined(LATER)
@@ -413,6 +453,8 @@ void  operational_test (void)
        //  -- single step thru each statement under debugger and note effects --
        //------------------------------------------------------
     MotorLib_Set_Speed_Duty_Cycle (0, 20);          // set duty cycle = 20 %
+while (wait_1)
+  ;            // DEBUG HACK
     MotorLib_Set_Speed_Duty_Cycle (0, 30);          // set duty cycle = 30 %
     MotorLib_Set_Speed_Duty_Cycle (0, 40);          // set duty cycle = 40 %
     MotorLib_Set_Speed_Duty_Cycle (0, 50);          // set duty cycle = 50 %
@@ -425,6 +467,8 @@ void  operational_test (void)
     MotorLib_Set_Direction (0, DIRECTION_BACKWARD); // spin motor other direction
     MotorLib_Set_Speed_Duty_Cycle (0, 20);          // set duty cycle = 20 %
     MotorLib_Run (1, DIRECTION_BACKWARD);
+while (wait_2)
+  ;            // DEBUG HACK
     MotorLib_Set_Speed_Duty_Cycle (0, 30);          // set duty cycle = 30 %
     MotorLib_Set_Speed_Duty_Cycle (0, 40);          // set duty cycle = 40 %
     MotorLib_Set_Speed_Duty_Cycle (0, 50);          // set duty cycle = 50 %
@@ -433,6 +477,8 @@ void  operational_test (void)
     MotorLib_Set_Speed_Duty_Cycle (0, 80);          // set duty cycle = 80 %
     MotorLib_Set_Speed_Duty_Cycle (0, 90);          // set duty cycle = 90 %
     MotorLib_Stop (0, STOP_HARD_BRAKE);
+while (wait_3)
+  ;            // DEBUG HACK
 
 //  MotorLib_Set_Direction (0, DIRECTION_FORWARD); // and flip direction again
     MotorLib_Set_Speed_Duty_Cycle (0, 70);      // set duty cycle = 70 %
@@ -448,7 +494,8 @@ void  operational_test (void)
     MotorLib_Set_Decay (0, DECAY_FAST);
     MotorLib_Set_Speed_Duty_Cycle (0, 20);      // set duty cycle = 20 %
     MotorLib_Run (0, DIRECTION_FORWARD);        // restart the motor
-
+while (wait_4)
+  ;            // DEBUG HACK
     MotorLib_Set_Speed_Duty_Cycle (0, 30);      // set duty cycle = 30 %
     MotorLib_Set_Speed_Duty_Cycle (0, 40);      // set duty cycle = 40 %
     MotorLib_Set_Speed_Duty_Cycle (0, 50);      // set duty cycle = 50 %
@@ -462,7 +509,8 @@ void  operational_test (void)
     MotorLib_Set_Decay (0, DECAY_FAST);
     MotorLib_Set_Speed_Duty_Cycle (0, 20);               // set duty cycle = 20 %
     MotorLib_Run (0, DIRECTION_BACKWARD);       // restart the motor
-
+while (wait_5)
+  ;            // DEBUG HACK
     MotorLib_Set_Speed_Duty_Cycle (0, 30);               // set duty cycle = 30 %
     MotorLib_Set_Speed_Duty_Cycle (0, 40);               // set duty cycle = 40 %
     MotorLib_Set_Speed_Duty_Cycle (0, 50);               // set duty cycle = 50 %
@@ -480,7 +528,8 @@ void  operational_test (void)
     process_direction_switch (DIRECTION_FORWARD,0); // reset back to FORWARD, leave motors off
     MotorLib_Set_Speed_Duty_Cycle (1, 20);          // set duty cycle = 20 %
     MotorLib_Run (1, DIRECTION_FORWARD);        // explicitly start just Motor 2
-
+while (wait_6)
+  ;            // DEBUG HACK
     MotorLib_Set_Speed_Duty_Cycle (1, 30);          // set duty cycle = 30 %  Slow Decay starts with 30 %
     MotorLib_Set_Speed_Duty_Cycle (1, 40);          // set duty cycle = 40 %
     MotorLib_Set_Speed_Duty_Cycle (1, 50);          // set duty cycle = 50 %
@@ -493,7 +542,8 @@ void  operational_test (void)
     MotorLib_Set_Direction (1, DIRECTION_BACKWARD); // spin motor other direction
     MotorLib_Set_Speed_Duty_Cycle (1, 20);          // set duty cycle = 20 %
     MotorLib_Run (1, DIRECTION_BACKWARD);       // explicitly start just Motor 2
-
+while (wait_7)
+  ;            // DEBUG HACK
     MotorLib_Set_Speed_Duty_Cycle (1, 30);          // set duty cycle = 30 %  Slow Decay starts with 30 %
     MotorLib_Set_Speed_Duty_Cycle (1, 40);          // set duty cycle = 40 %
     MotorLib_Set_Speed_Duty_Cycle (1, 50);          // set duty cycle = 50 %
@@ -521,6 +571,8 @@ void  operational_test (void)
     MotorLib_Speed_Ramp (0, RAMP_UP, 10, 90, 3000, 30, &ramp_done_callback);
     while (ramp_complete_callback_flag == 0)
       ;     // loop till done          ==> uses callback
+while (wait_8)
+  ;            // DEBUG HACK
 
     board_delay_ms (2000);                    // wait for 2 seconds before next run
     ramp_complete_callback_flag = 0;       // clear RAMP complete flag
@@ -529,6 +581,8 @@ void  operational_test (void)
     MotorLib_Speed_Ramp (0, RAMP_DOWN, 90, 10, 3000, 30, NULL_MPTR);
     while (MotorLib_Speed_Ramp_Check_Complete(0) == 0)
       ;     // loop till done          ==> polls for complete, no callback
+while (wait_9)
+  ;            // DEBUG HACK
 
     board_delay_ms (2000);                    // wait for 2 seconds before next run
     ramp_complete_callback_flag = 0;       // clear RAMP complete flag
